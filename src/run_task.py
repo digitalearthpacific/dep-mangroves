@@ -5,14 +5,14 @@ import geopandas as gpd
 import typer
 from rasterio.warp import transform_bounds
 import rioxarray as rx
-from xarray import DataArray, Dataset
+from xarray import DataArray
 import xrspatial.multispectral as ms
 
-from azure_logger import CsvLogger, get_log_path
+from azure_logger import CsvLogger
 from dep_tools.loaders import Sentinel2OdcLoader
 from dep_tools.namers import DepItemPath
 from dep_tools.processors import Processor
-from dep_tools.runner import run_by_area_dask
+from dep_tools.runner import run_by_area_dask_local
 from dep_tools.utils import get_container_client
 from dep_tools.writers import AzureDsWriter
 
@@ -23,7 +23,11 @@ class MangrovesProcessor(Processor):
     def process(self, xr: DataArray) -> DataArray:
         median = xr.resample(time="1Y").median().squeeze()
         gmw = load_gmw(xr)
-        return ms.ndvi(median.sel(band="B08"), median.sel(band="B04")).where(gmw)
+        return (
+            ms.ndvi(median.sel(band="B08"), median.sel(band="B04"))
+            .where(gmw)
+            .to_dataset(name="ndvi")
+        )
 
 
 def load_gmw(ds) -> DataArray:
@@ -31,12 +35,7 @@ def load_gmw(ds) -> DataArray:
 
     gmw = rx.open_rasterio(input_path, chunks=True)
     bounds = list(transform_bounds(ds.rio.crs, gmw.rio.crs, *ds.rio.bounds()))
-    return (
-        gmw.rio.clip_box(*bounds)
-        .squeeze()
-        .rio.reproject_match(ds)
-        .to_dataset(name="ndvi")
-    )
+    return gmw.rio.clip_box(*bounds).squeeze().rio.reproject_match(ds)
 
 
 def main(
@@ -72,18 +71,18 @@ def main(
     logger = CsvLogger(
         name=dataset_id,
         container_client=get_container_client(),
-        path=get_log_path(dataset_id, version, datetime),
+        path=itempath.log_path(),
         overwrite=False,
         header="time|index|status|paths|comment\n",
     )
 
-    run_by_area_dask(
+    run_by_area_dask_local(
         areas=grid,
         loader=loader,
         processor=processor,
         writer=writer,
         logger=logger,
-        continue_on_error=True,
+        continue_on_error=False,
     )
 
 
