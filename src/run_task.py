@@ -7,6 +7,7 @@ from rasterio.warp import transform_bounds
 import rioxarray as rx
 from xarray import DataArray
 import xrspatial.multispectral as ms
+import numpy as np
 
 from azure_logger import CsvLogger
 from dep_tools.loaders import Sentinel2OdcLoader
@@ -23,11 +24,20 @@ class MangrovesProcessor(Processor):
     def process(self, xr: DataArray) -> DataArray:
         median = xr.resample(time="1Y").median().squeeze()
         gmw = load_gmw(xr)
-        return (
+        ndvi = (
             ms.ndvi(median.sel(band="B08"), median.sel(band="B04"))
             .where(gmw)
-            .to_dataset(name="ndvi")
+            .to_dataset(name="mangrove")
         )
+        masked = ndvi.where(gmw.squeeze())
+        mangroves = xr.where(masked > 0.4, 1, np.nan)
+        regular_mangroves = mangroves.where(masked <= 0.7)
+        closed_mangroves = mangroves.where(masked > 0.7)
+        regular_mangroves = regular_mangroves.rename({"mangrove": "regular"})
+        closed_mangroves = closed_mangroves.rename({"mangrove": "closed"})
+        mangroves = xr.merge([mangroves, regular_mangroves, closed_mangroves])
+        mangroves = mangroves.squeeze()
+        return mangroves
 
 
 def load_gmw(ds) -> DataArray:
@@ -39,13 +49,13 @@ def load_gmw(ds) -> DataArray:
 
 
 def main(
-    # region_code: str,
-    # region_index: str,
-    datetime: str = "2022",
-    version: str = "test.0.1",
+    region_code: Annotated[str, typer.Option()],
+    region_index: Annotated[str, typer.Option()],
+    datetime: Annotated[str, typer.Option()],
+    version: Annotated[str, typer.Option()],
     dataset_id: str = "mangroves",
 ) -> None:
-    # cell = grid.loc[[(region_code, region_index)]]
+    cell = grid.loc[[(region_code, region_index)]]
 
     loader = Sentinel2OdcLoader(
         epsg=3832,
