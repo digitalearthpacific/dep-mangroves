@@ -37,14 +37,6 @@ class MangrovesProcessor(Processor):
         return set_stac_properties(xr, ds)
 
 
-def load_gmw(ds) -> DataArray:
-    input_path = "https://deppcpublicstorage.blob.core.windows.net/input/gmw/gmw_v3_2020_ras_dep.tif"
-
-    gmw = rx.open_rasterio(input_path, chunks=True)
-    bounds = list(transform_bounds(ds.rio.crs, gmw.rio.crs, *ds.rio.bounds()))
-    return gmw.rio.clip_box(*bounds).squeeze().rio.reproject_match(ds)
-
-
 def get_gmw_shapes_for_area(area: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
     return gpd.read_file("data/gmw_v3_2020_vec.shp", mask=area)
 
@@ -58,7 +50,7 @@ def main(
 ) -> None:
     cell = grid.loc[[(region_code, region_index)]]
 
-    area = get_gmw_shapes_for_area(cell).dissolve("PXLVAL").set_index(cell.index)
+    area = get_gmw_shapes_for_area(cell).dissolve("PXLVAL")
 
     loader = Sentinel2OdcLoader(
         epsg=3832,
