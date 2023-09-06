@@ -49,7 +49,7 @@ def main(
     region_index: Annotated[str, typer.Option()],
     datetime: Annotated[str, typer.Option()],
     version: Annotated[str, typer.Option()],
-    dask_mem_gb: Annotated[int, typer.Option(default=8)],
+    dask_mem_gb: Annotated[int, typer.Option()] = 8,
     dataset_id: str = "mangroves",
 ) -> None:
     cell = grid.loc[[(region_code, region_index)]]
