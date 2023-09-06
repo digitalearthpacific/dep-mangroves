@@ -1,14 +1,7 @@
-from typing_extensions import Annotated
-from typing import List
-
-import geopandas as gpd
-import typer
-from rasterio.warp import transform_bounds
-import rioxarray as rx
-from xarray import DataArray
-import xrspatial.multispectral as ms
 import numpy as np
-
+import rioxarray as rx
+import typer
+import xrspatial.multispectral as ms
 from azure_logger import CsvLogger
 from dep_tools.loaders import Sentinel2OdcLoader
 from dep_tools.namers import DepItemPath
@@ -16,6 +9,9 @@ from dep_tools.processors import Processor
 from dep_tools.runner import run_by_area_dask_local
 from dep_tools.utils import get_container_client
 from dep_tools.writers import AzureDsWriter
+from rasterio.warp import transform_bounds
+from typing_extensions import Annotated
+from xarray import DataArray
 
 from grid import grid
 
@@ -53,6 +49,7 @@ def main(
     region_index: Annotated[str, typer.Option()],
     datetime: Annotated[str, typer.Option()],
     version: Annotated[str, typer.Option()],
+    dask_mem_gb: Annotated[int, typer.Option(default=8)],
     dataset_id: str = "mangroves",
 ) -> None:
     cell = grid.loc[[(region_code, region_index)]]
@@ -93,6 +90,7 @@ def main(
         writer=writer,
         logger=logger,
         continue_on_error=False,
+        worker_memory=dask_mem_gb,
     )
 
 
