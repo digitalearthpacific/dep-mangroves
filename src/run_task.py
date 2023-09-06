@@ -1,4 +1,5 @@
 import ast
+import fsspec
 from typing_extensions import Annotated
 
 import geopandas as gpd
@@ -45,14 +46,12 @@ class MangrovesProcessor(Processor):
 
 
 def get_gmw_shapes_for_area(area: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
-    return (
-        gpd.read_file(
-            "data/gmw_v3_2020_vec.shp",
-            mask=area,
-        )
-        .dissolve("PXLVAL")
-        .set_index(area.index)
-    )
+    url = "https://deppcpublicstorage.blob.core.windows.net/input/gmw/gmw_v3_2020_vec_dep.parquet"
+
+    with fsspec.open(url) as file:
+        gmw = gpd.read_parquet(file)
+
+    return gmw.clip(area.to_crs(gmw.crs)).dissolve("PXLVAL").set_index(area.index)
 
 
 def main(

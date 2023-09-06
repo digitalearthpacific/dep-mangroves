@@ -19,11 +19,6 @@ RUN pip3 install -r /tmp/requirements.txt
 
 ADD . /code
 
-ADD https://deppcpublicstorage.blob.core.windows.net/input/gmw/gmw_v3_2020_vec.shp /code/data/
-ADD https://deppcpublicstorage.blob.core.windows.net/input/gmw/gmw_v3_2020_vec.dbf /code/data/
-ADD https://deppcpublicstorage.blob.core.windows.net/input/gmw/gmw_v3_2020_vec.shx /code/data/
-ADD https://deppcpublicstorage.blob.core.windows.net/input/gmw/gmw_v3_2020_vec.prj /code/data/
-
 WORKDIR /code
 
 # Don't use old pygeos
