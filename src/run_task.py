@@ -28,7 +28,7 @@ class MangrovesProcessor(Processor):
             ms.ndvi(median.sel(band="B08"), median.sel(band="B04")).to_dataset(
                 name="ndvi"
             )
-            # I usually eschew compute here but as the writer writes individual
+            # I usually avoid compute here but as the writer writes individual
             # variables as separate tif tiles data are re-pulled for each dervied
             # dataset below. If we get memory errors then we could remove this,
             # things will take a bit longer though (and there will be a lot more
