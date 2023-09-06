@@ -87,7 +87,7 @@ def main(
     )
 
     run_by_area_dask_local(
-        areas=grid,
+        areas=cell,
         loader=loader,
         processor=processor,
         writer=writer,
