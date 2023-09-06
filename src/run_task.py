@@ -1,12 +1,21 @@
+import ast
+import fsspec
+from typing_extensions import Annotated
+
+import geopandas as gpd
+import typer
+from xarray import DataArray
+import xrspatial.multispectral as ms
+from xrspatial.classify import reclassify
 import numpy as np
 import rioxarray as rx
-import typer
-import xrspatial.multispectral as ms
+
 from azure_logger import CsvLogger
 from dep_tools.loaders import Sentinel2OdcLoader
 from dep_tools.namers import DepItemPath
 from dep_tools.processors import Processor
 from dep_tools.runner import run_by_area_dask_local
+from dep_tools.stac_utils import set_stac_properties
 from dep_tools.utils import get_container_client
 from dep_tools.writers import AzureDsWriter
 from rasterio.warp import transform_bounds
@@ -18,30 +27,34 @@ from grid import grid
 
 class MangrovesProcessor(Processor):
     def process(self, xr: DataArray) -> DataArray:
-        median = xr.resample(time="1Y").median().squeeze()
-        gmw = load_gmw(xr)
-        ndvi = (
-            ms.ndvi(median.sel(band="B08"), median.sel(band="B04"))
-            .where(gmw)
-            .to_dataset(name="mangrove")
+        median = xr.median("time")
+        ds = (
+            ms.ndvi(median.sel(band="B08"), median.sel(band="B04")).to_dataset(
+                name="ndvi"
+            )
+            # I usually avoid compute here but as the writer writes individual
+            # variables as separate tif tiles data are re-pulled for each dervied
+            # dataset below. If we get memory errors then we could remove this,
+            # things will take a bit longer though (and there will be a lot more
+            # network traffic).
+            .compute()
         )
-        masked = ndvi.where(gmw.squeeze())
-        mangroves = xr.where(masked > 0.4, 1, np.nan)
-        regular_mangroves = mangroves.where(masked <= 0.7)
-        closed_mangroves = mangroves.where(masked > 0.7)
-        regular_mangroves = regular_mangroves.rename({"mangrove": "regular"})
-        closed_mangroves = closed_mangroves.rename({"mangrove": "closed"})
-        mangroves = xr.merge([mangroves, regular_mangroves, closed_mangroves])
-        mangroves = mangroves.squeeze()
-        return mangroves
+        ds["mangroves"] = reclassify(ds.ndvi, [0.4, np.inf], [float("nan"), 1])
+        ds["regular"] = reclassify(
+            ds.ndvi, [0.4, 0.7, np.inf], [float("nan"), 1, float("nan")]
+        )
+        ds["closed"] = reclassify(ds.ndvi, [0.7, np.inf], [float("nan"), 1])
+
+        return set_stac_properties(xr, ds)
 
 
-def load_gmw(ds) -> DataArray:
-    input_path = "https://deppcpublicstorage.blob.core.windows.net/input/gmw/gmw_v3_2020_ras_dep.tif"
+def get_gmw_shapes_for_area(area: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    url = "https://deppcpublicstorage.blob.core.windows.net/input/gmw/gmw_v3_2020_vec_dep.parquet"
 
-    gmw = rx.open_rasterio(input_path, chunks=True)
-    bounds = list(transform_bounds(ds.rio.crs, gmw.rio.crs, *ds.rio.bounds()))
-    return gmw.rio.clip_box(*bounds).squeeze().rio.reproject_match(ds)
+    with fsspec.open(url) as file:
+        gmw = gpd.read_parquet(file)
+
+    return gmw.clip(area.to_crs(gmw.crs)).dissolve("PXLVAL").set_index(area.index)
 
 
 def main(
@@ -49,18 +62,18 @@ def main(
     region_index: Annotated[str, typer.Option()],
     datetime: Annotated[str, typer.Option()],
     version: Annotated[str, typer.Option()],
+    local_cluster_kwargs: Annotated[str, typer.Option(..., callback=ast.literal_eval)],
     dataset_id: str = "mangroves",
 ) -> None:
     cell = grid.loc[[(region_code, region_index)]]
+
+    area = get_gmw_shapes_for_area(cell)
 
     loader = Sentinel2OdcLoader(
         epsg=3832,
         datetime=datetime,
         dask_chunksize=dict(band=1, time=1, x=4096, y=4096),
-        odc_load_kwargs=dict(
-            fail_on_error=False,
-            resolution=10,
-        ),
+        odc_load_kwargs=dict(fail_on_error=False, resolution=10, bands=["B04", "B08"]),
     )
 
     processor = MangrovesProcessor()
@@ -83,12 +96,13 @@ def main(
     )
 
     run_by_area_dask_local(
-        areas=cell,
+        areas=area,
         loader=loader,
         processor=processor,
         writer=writer,
         logger=logger,
         continue_on_error=False,
+        local_cluster_kwargs=local_cluster_kwargs,
     )
 
 
