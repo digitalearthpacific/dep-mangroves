@@ -1,14 +1,13 @@
+import ast
 from typing_extensions import Annotated
-from typing import List
 
 import geopandas as gpd
 import typer
-from rasterio.warp import transform_bounds
-import rioxarray as rx
 from xarray import DataArray
 import xrspatial.multispectral as ms
 from xrspatial.classify import reclassify
 import numpy as np
+import rioxarray as rx
 
 from azure_logger import CsvLogger
 from dep_tools.loaders import Sentinel2OdcLoader
@@ -25,8 +24,16 @@ from grid import grid
 class MangrovesProcessor(Processor):
     def process(self, xr: DataArray) -> DataArray:
         median = xr.median("time")
-        ds = ms.ndvi(median.sel(band="B08"), median.sel(band="B04")).to_dataset(
-            name="ndvi"
+        ds = (
+            ms.ndvi(median.sel(band="B08"), median.sel(band="B04")).to_dataset(
+                name="ndvi"
+            )
+            # I usually eschew compute here but as the writer writes individual
+            # variables as separate tif tiles data are re-pulled for each dervied
+            # dataset below. If we get memory errors then we could remove this,
+            # things will take a bit longer though (and there will be a lot more
+            # network traffic).
+            .compute()
         )
         ds["mangroves"] = reclassify(ds.ndvi, [0.4, np.inf], [float("nan"), 1])
         ds["regular"] = reclassify(
@@ -38,7 +45,14 @@ class MangrovesProcessor(Processor):
 
 
 def get_gmw_shapes_for_area(area: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
-    return gpd.read_file("data/gmw_v3_2020_vec.shp", mask=area)
+    return (
+        gpd.read_file(
+            "data/gmw_v3_2020_vec.shp",
+            mask=area,
+        )
+        .dissolve("PXLVAL")
+        .set_index(area.index)
+    )
 
 
 def main(
@@ -46,11 +60,12 @@ def main(
     region_index: Annotated[str, typer.Option()],
     datetime: Annotated[str, typer.Option()],
     version: Annotated[str, typer.Option()],
+    local_cluster_kwargs: Annotated[str, typer.Option(..., callback=ast.literal_eval)],
     dataset_id: str = "mangroves",
 ) -> None:
     cell = grid.loc[[(region_code, region_index)]]
 
-    area = get_gmw_shapes_for_area(cell).dissolve("PXLVAL")
+    area = get_gmw_shapes_for_area(cell)
 
     loader = Sentinel2OdcLoader(
         epsg=3832,
@@ -85,6 +100,7 @@ def main(
         writer=writer,
         logger=logger,
         continue_on_error=False,
+        local_cluster_kwargs=local_cluster_kwargs,
     )
 
 
