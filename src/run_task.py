@@ -7,6 +7,7 @@ from rasterio.warp import transform_bounds
 import rioxarray as rx
 from xarray import DataArray
 import xrspatial.multispectral as ms
+from xrspatial.classify import reclassify
 import numpy as np
 
 from azure_logger import CsvLogger
@@ -14,6 +15,7 @@ from dep_tools.loaders import Sentinel2OdcLoader
 from dep_tools.namers import DepItemPath
 from dep_tools.processors import Processor
 from dep_tools.runner import run_by_area_dask_local
+from dep_tools.stac_utils import set_stac_properties
 from dep_tools.utils import get_container_client
 from dep_tools.writers import AzureDsWriter
 
@@ -22,22 +24,17 @@ from grid import grid
 
 class MangrovesProcessor(Processor):
     def process(self, xr: DataArray) -> DataArray:
-        median = xr.resample(time="1Y").median().squeeze()
-        gmw = load_gmw(xr)
-        ndvi = (
-            ms.ndvi(median.sel(band="B08"), median.sel(band="B04"))
-            .where(gmw)
-            .to_dataset(name="mangrove")
+        median = xr.median("time")
+        ds = ms.ndvi(median.sel(band="B08"), median.sel(band="B04")).to_dataset(
+            name="ndvi"
         )
-        masked = ndvi.where(gmw.squeeze())
-        mangroves = xr.where(masked > 0.4, 1, np.nan)
-        regular_mangroves = mangroves.where(masked <= 0.7)
-        closed_mangroves = mangroves.where(masked > 0.7)
-        regular_mangroves = regular_mangroves.rename({"mangrove": "regular"})
-        closed_mangroves = closed_mangroves.rename({"mangrove": "closed"})
-        mangroves = xr.merge([mangroves, regular_mangroves, closed_mangroves])
-        mangroves = mangroves.squeeze()
-        return mangroves
+        ds["mangroves"] = reclassify(ds.ndvi, [0.4, np.inf], [float("nan"), 1])
+        ds["regular"] = reclassify(
+            ds.ndvi, [0.4, 0.7, np.inf], [float("nan"), 1, float("nan")]
+        )
+        ds["closed"] = reclassify(ds.ndvi, [0.7, np.inf], [float("nan"), 1])
+
+        return set_stac_properties(xr, ds)
 
 
 def load_gmw(ds) -> DataArray:
@@ -46,6 +43,10 @@ def load_gmw(ds) -> DataArray:
     gmw = rx.open_rasterio(input_path, chunks=True)
     bounds = list(transform_bounds(ds.rio.crs, gmw.rio.crs, *ds.rio.bounds()))
     return gmw.rio.clip_box(*bounds).squeeze().rio.reproject_match(ds)
+
+
+def get_gmw_shapes_for_area(area: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+    return gpd.read_file("data/gmw_v3_2020_vec.shp", mask=area)
 
 
 def main(
@@ -57,14 +58,13 @@ def main(
 ) -> None:
     cell = grid.loc[[(region_code, region_index)]]
 
+    area = get_gmw_shapes_for_area(cell).dissolve("PXLVAL").set_index(cell.index)
+
     loader = Sentinel2OdcLoader(
         epsg=3832,
         datetime=datetime,
         dask_chunksize=dict(band=1, time=1, x=4096, y=4096),
-        odc_load_kwargs=dict(
-            fail_on_error=False,
-            resolution=10,
-        ),
+        odc_load_kwargs=dict(fail_on_error=False, resolution=10, bands=["B04", "B08"]),
     )
 
     processor = MangrovesProcessor()
@@ -87,7 +87,7 @@ def main(
     )
 
     run_by_area_dask_local(
-        areas=grid,
+        areas=area,
         loader=loader,
         processor=processor,
         writer=writer,
