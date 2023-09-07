@@ -62,7 +62,7 @@ def main(
     region_index: Annotated[str, typer.Option()],
     datetime: Annotated[str, typer.Option()],
     version: Annotated[str, typer.Option()],
-    local_cluster_kwargs: Annotated[str, typer.Option(..., callback=ast.literal_eval)],
+    local_cluster_kwargs: Annotated[str, typer.Option()] = "",
     dataset_id: str = "mangroves",
 ) -> None:
     cell = grid.loc[[(region_code, region_index)]]
@@ -95,6 +95,9 @@ def main(
         header="time|index|status|paths|comment\n",
     )
 
+    local_cluster_kwargs_dict = (
+        ast.literal_eval(local_cluster_kwargs) if local_cluster_kwargs != "" else dict()
+    )
     run_by_area_dask_local(
         areas=area,
         loader=loader,
@@ -102,7 +105,7 @@ def main(
         writer=writer,
         logger=logger,
         continue_on_error=False,
-        local_cluster_kwargs=local_cluster_kwargs,
+        local_cluster_kwargs=local_cluster_kwargs_dict,
     )
 
 
