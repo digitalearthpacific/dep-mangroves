@@ -1,24 +1,23 @@
 import ast
-import fsspec
+import sys
 from typing_extensions import Annotated
+import warnings
 
-import geopandas as gpd
 import typer
 from xarray import DataArray
 import xrspatial.multispectral as ms
 from xrspatial.classify import reclassify
 import numpy as np
-import rioxarray as rx
 
-from azure_logger import CsvLogger
+from azure_logger import CsvLogger, filter_by_log
 from dep_tools.loaders import Sentinel2OdcLoader
 from dep_tools.namers import DepItemPath
 from dep_tools.processors import Processor
-from dep_tools.runner import run_by_area_dask_local
+from dep_tools.runner import run_by_area_dask_local, run_by_area_dask
+from dep_tools.s2_utils import scale_and_offset_s2
 from dep_tools.stac_utils import set_stac_properties
 from dep_tools.utils import get_container_client
 from dep_tools.writers import AzureDsWriter
-from rasterio.warp import transform_bounds
 from typing_extensions import Annotated
 from xarray import DataArray
 
@@ -27,6 +26,7 @@ from grid import grid
 
 class MangrovesProcessor(Processor):
     def process(self, xr: DataArray) -> DataArray:
+        xr = scale_and_offset_s2(xr)
         median = xr.median("time")
         ds = (
             ms.ndvi(median.sel(band="B08"), median.sel(band="B04")).to_dataset(
@@ -39,35 +39,39 @@ class MangrovesProcessor(Processor):
             # network traffic).
             .compute()
         )
-        ds["mangroves"] = reclassify(ds.ndvi, [0.4, np.inf], [float("nan"), 1])
+        ds["mangroves"] = reclassify(ds.ndvi, [0.4, np.inf], [float("nan"), 1]).astype(
+            int
+        )
         ds["regular"] = reclassify(
             ds.ndvi, [0.4, 0.7, np.inf], [float("nan"), 1, float("nan")]
-        )
-        ds["closed"] = reclassify(ds.ndvi, [0.7, np.inf], [float("nan"), 1])
+        ).astype(int)
+        ds["closed"] = reclassify(ds.ndvi, [0.7, np.inf], [float("nan"), 1]).astype(int)
 
         return set_stac_properties(xr, ds)
 
 
-def get_gmw_shapes_for_area(area: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
-    url = "https://deppcpublicstorage.blob.core.windows.net/input/gmw/gmw_v3_2020_vec_dep.parquet"
-
-    with fsspec.open(url) as file:
-        gmw = gpd.read_parquet(file)
-
-    return gmw.clip(area.to_crs(gmw.crs)).dissolve("PXLVAL").set_index(area.index)
-
-
 def main(
-    region_code: Annotated[str, typer.Option()],
-    region_index: Annotated[str, typer.Option()],
     datetime: Annotated[str, typer.Option()],
     version: Annotated[str, typer.Option()],
+    region_code: Annotated[str, typer.Option()] = "",
+    region_index: Annotated[str, typer.Option()] = "",
     local_cluster_kwargs: Annotated[str, typer.Option()] = "",
     dataset_id: str = "mangroves",
 ) -> None:
-    cell = grid.loc[[(region_code, region_index)]]
+    areas = grid
 
-    area = get_gmw_shapes_for_area(cell)
+    # None would be better for default but typer doesn't support it (str|None)
+    if region_code != "":
+        areas = grid[grid.index.get_level_values("code").isin([region_code])]
+
+    if region_index != "":
+        areas = grid[grid.index == (region_code, region_index)]
+
+    if len(areas) == 0:
+        warnings.warn(
+            f"index ({region_code}, {region_index}) not found in grid, no output produced"
+        )
+        sys.exit(0)
 
     loader = Sentinel2OdcLoader(
         epsg=3832,
@@ -81,12 +85,10 @@ def main(
 
     writer = AzureDsWriter(
         itempath=itempath,
-        convert_to_int16=True,
-        overwrite=True,
-        output_value_multiplier=10000,
+        overwrite=False,
         extra_attrs=dict(dep_version=version),
-        write_stac=True,
     )
+
     logger = CsvLogger(
         name=dataset_id,
         container_client=get_container_client(),
@@ -98,8 +100,9 @@ def main(
     local_cluster_kwargs_dict = (
         ast.literal_eval(local_cluster_kwargs) if local_cluster_kwargs != "" else dict()
     )
+    areas = filter_by_log(areas, logger.parse_log())
     run_by_area_dask_local(
-        areas=area,
+        areas=areas,
         loader=loader,
         processor=processor,
         writer=writer,

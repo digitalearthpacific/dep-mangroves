@@ -1,0 +1,12 @@
+image: "ghcr.io/digitalearthpacific/dep-mangroves:latest"
+profile: r
+code: "src/"
+command:
+  - python
+  - run_task.py
+  - --region-code
+  - PG
+  - --datetime
+  - "2020"
+  - --version
+  - "0.0.1"
