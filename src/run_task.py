@@ -107,14 +107,14 @@ def main(
         ast.literal_eval(local_cluster_kwargs) if local_cluster_kwargs != "" else dict()
     )
     areas = filter_by_log(areas, logger.parse_log())
-    run_by_area_dask(
+    run_by_area_dask_local(
         areas=areas,
         loader=loader,
         processor=processor,
         writer=writer,
         logger=logger,
         continue_on_error=False,
-        #        local_cluster_kwargs=local_cluster_kwargs_dict,
+        local_cluster_kwargs=local_cluster_kwargs_dict,
     )
 
 
