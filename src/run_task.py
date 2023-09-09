@@ -42,24 +42,16 @@ class MangrovesProcessor(Processor):
             .compute()
         )
         ds["mangroves"] = (
-            reclassify(ds.ndvi, [0.4, np.inf], [float("nan"), 1])
-            .astype(int)
-            .where(ds.ndvi, output_nodata)
+            reclassify(ds.ndvi, [0.4, np.inf], [float("nan"), 1]).astype(int)
+            #            .where(~np.isnan(ds.ndvi), output_nodata)
+            #            .astype("int16")
+            #            .rio.write_nodata(output_nodata)
         )
-        ds["regular"] = (
-            reclassify(ds.ndvi, [0.4, 0.7, np.inf], [float("nan"), 1, float("nan")])
-            .astype(int)
-            .where(ds.ndvi, output_nodata)
-        )
+        ds["regular"] = reclassify(
+            ds.ndvi, [0.4, 0.7, np.inf], [float("nan"), 1, float("nan")]
+        ).astype(int)
 
-        ds["closed"] = (
-            reclassify(ds.ndvi, [0.7, np.inf], [float("nan"), 1])
-            .astype(int)
-            .where(ds.ndvi, output_nodata)
-        )
-
-        ds["count"] = ds.ndvi.count().astype(int).where(ds.ndvi, output_nodata)
-
+        ds["closed"] = reclassify(ds.ndvi, [0.7, np.inf], [float("nan"), 1]).astype(int)
         return set_stac_properties(xr, ds)
 
 
