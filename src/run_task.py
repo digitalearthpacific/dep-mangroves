@@ -23,6 +23,8 @@ from xarray import DataArray
 
 from grid import grid
 
+output_nodata = -32767
+
 
 class MangrovesProcessor(Processor):
     def process(self, xr: DataArray) -> DataArray:
@@ -39,13 +41,24 @@ class MangrovesProcessor(Processor):
             # network traffic).
             .compute()
         )
-        ds["mangroves"] = reclassify(ds.ndvi, [0.4, np.inf], [float("nan"), 1]).astype(
-            int
+        ds["mangroves"] = (
+            reclassify(ds.ndvi, [0.4, np.inf], [float("nan"), 1])
+            .astype(int)
+            .where(ds.ndvi, output_nodata)
         )
-        ds["regular"] = reclassify(
-            ds.ndvi, [0.4, 0.7, np.inf], [float("nan"), 1, float("nan")]
-        ).astype(int)
-        ds["closed"] = reclassify(ds.ndvi, [0.7, np.inf], [float("nan"), 1]).astype(int)
+        ds["regular"] = (
+            reclassify(ds.ndvi, [0.4, 0.7, np.inf], [float("nan"), 1, float("nan")])
+            .astype(int)
+            .where(ds.ndvi, output_nodata)
+        )
+
+        ds["closed"] = (
+            reclassify(ds.ndvi, [0.7, np.inf], [float("nan"), 1])
+            .astype(int)
+            .where(ds.ndvi, output_nodata)
+        )
+
+        ds["count"] = ds.ndvi.count().astype(int).where(ds.ndvi, output_nodata)
 
         return set_stac_properties(xr, ds)
 
@@ -86,6 +99,7 @@ def main(
     writer = AzureDsWriter(
         itempath=itempath,
         overwrite=False,
+        output_nodata=output_nodata,
         extra_attrs=dict(dep_version=version),
     )
 
@@ -101,14 +115,14 @@ def main(
         ast.literal_eval(local_cluster_kwargs) if local_cluster_kwargs != "" else dict()
     )
     areas = filter_by_log(areas, logger.parse_log())
-    run_by_area_dask_local(
+    run_by_area_dask(
         areas=areas,
         loader=loader,
         processor=processor,
         writer=writer,
         logger=logger,
         continue_on_error=False,
-        local_cluster_kwargs=local_cluster_kwargs_dict,
+        #        local_cluster_kwargs=local_cluster_kwargs_dict,
     )
 
 
