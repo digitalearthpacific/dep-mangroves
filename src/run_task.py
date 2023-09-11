@@ -20,6 +20,8 @@ from xrspatial.classify import reclassify
 
 from grid import grid
 
+MANGROVES_BASE_PRODUCT = "s2"
+MANGROVES_DATASET_ID = "mangroves"
 output_nodata = -32767
 
 
@@ -58,7 +60,7 @@ def main(
     region_code: Annotated[str, typer.Option()] = "",
     region_index: Annotated[str, typer.Option()] = "",
     local_cluster_kwargs: Annotated[str, typer.Option()] = "",
-    dataset_id: str = "mangroves",
+    dataset_id: str = MANGROVES_DATASET_ID,
 ) -> None:
     areas = grid
 
@@ -83,7 +85,7 @@ def main(
     )
 
     processor = MangrovesProcessor()
-    itempath = DepItemPath("s2", dataset_id, version, datetime)
+    itempath = DepItemPath(MANGROVES_BASE_PRODUCT, dataset_id, version, datetime)
 
     writer = AzureDsWriter(
         itempath=itempath,

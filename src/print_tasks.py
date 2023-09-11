@@ -9,6 +9,7 @@ from dep_tools.namers import DepItemPath
 from dep_tools.utils import get_container_client
 
 from grid import grid
+from run_task import MANGROVES_BASE_PRODUCT, MANGROVES_DATASET_ID
 
 
 def main(
@@ -17,8 +18,9 @@ def main(
     version: Annotated[str, typer.Option()],
     limit: Optional[str] = None,
     no_retry_errors: Optional[bool] = False,
-    dataset_id: str = "wofs",
+    dataset_id: str = MANGROVES_DATASET_ID,
 ) -> None:
+    assert dataset_id is not None, "dataset_id must be provided"
     region_codes = None if regions.upper() == "ALL" else regions.split(",")
 
     # Makes a list no matter what
@@ -32,7 +34,7 @@ def main(
         grid.loc[grid.code.isin(region_codes)] if region_codes is not None else grid
     )
 
-    itempath = DepItemPath("ls", dataset_id, version, datetime)
+    itempath = DepItemPath(MANGROVES_BASE_PRODUCT, dataset_id, version, datetime)
     logger = CsvLogger(
         name=dataset_id,
         container_client=get_container_client(),
@@ -52,7 +54,7 @@ def main(
     ]
 
     if limit is not None:
-        params = params[0 : int(limit)]
+        params = params[0: int(limit)]
 
     json.dump(params, sys.stdout)
 
