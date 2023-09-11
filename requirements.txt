@@ -1,6 +1,6 @@
 typer
-git+https://github.com/digitalearthpacific/dep-tools.git@b8726f3
-git+https://github.com/jessjaco/azure-logger.git@b23c9c7
+git+https://github.com/digitalearthpacific/dep-tools.git@2a791ae
+git+https://github.com/jessjaco/azure-logger.git
 xarray-spatial
 
 --no-binary gdal
