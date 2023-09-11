@@ -18,7 +18,6 @@ from typing_extensions import Annotated
 from xarray import DataArray
 from xrspatial.classify import reclassify
 
-from grid import grid
 
 MANGROVES_BASE_PRODUCT = "s2"
 MANGROVES_DATASET_ID = "mangroves"
@@ -28,29 +27,27 @@ output_nodata = -32767
 class MangrovesProcessor(Processor):
     def process(self, xr: DataArray) -> DataArray:
         xr = scale_and_offset_s2(xr)
-        median = xr.median("time")
-        ds = (
-            ms.ndvi(median.sel(band="B08"), median.sel(band="B04")).to_dataset(
-                name="ndvi"
-            )
-            # I usually avoid compute here but as the writer writes individual
-            # variables as separate tif tiles data are re-pulled for each dervied
-            # dataset below. If we get memory errors then we could remove this,
-            # things will take a bit longer though (and there will be a lot more
-            # network traffic).
-            .compute()
-        )
-        ds["mangroves"] = (
-            reclassify(ds.ndvi, [0.4, np.inf], [float("nan"), 1]).astype(int)
-            #            .where(~np.isnan(ds.ndvi), output_nodata)
-            #            .astype("int16")
-            #            .rio.write_nodata(output_nodata)
-        )
+        # TODO: consider cloud mask here
+        # Also, think about keeping data as INT as long as possible
+        # to reduce memory usage. The S2Loader converts to Float...
+
+        # Load into memory
+        median = xr.median("time").compute()
+
+        ds = ms.ndvi(median.sel(band="B08"), median.sel(band="B04")).to_dataset(name="ndvi")
+
+        ds["mangroves"] = reclassify(
+            ds.ndvi, [0.4, np.inf], [float("nan"), 1]
+        ).astype(int)
+
         ds["regular"] = reclassify(
             ds.ndvi, [0.4, 0.7, np.inf], [float("nan"), 1, float("nan")]
         ).astype(int)
 
-        ds["closed"] = reclassify(ds.ndvi, [0.7, np.inf], [float("nan"), 1]).astype(int)
+        ds["closed"] = reclassify(
+            ds.ndvi, [0.7, np.inf], [float("nan"), 1]
+        ).astype(int)
+
         return set_stac_properties(xr, ds)
 
 
@@ -62,6 +59,7 @@ def main(
     local_cluster_kwargs: Annotated[str, typer.Option()] = "",
     dataset_id: str = MANGROVES_DATASET_ID,
 ) -> None:
+    from grid import grid
     areas = grid
 
     # None would be better for default but typer doesn't support it (str|None)
