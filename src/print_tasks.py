@@ -43,7 +43,7 @@ def main(
         header="time|index|status|paths|comment\n",
     )
 
-    grid_subset = filter_by_log(grid_subset, logger.parse_log(), not no_retry_errors)
+    grid_subset = filter_by_log(grid_subset, logger.parse_log())
     params = [
         {
             "region-code": region[0][0],
