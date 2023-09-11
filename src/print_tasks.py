@@ -54,7 +54,7 @@ def main(
     ]
 
     if limit is not None:
-        params = params[0: int(limit)]
+        params = params[0 : int(limit)]
 
     json.dump(params, sys.stdout)
 
