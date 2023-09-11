@@ -28,7 +28,7 @@ def main(
     if len(years) == 2:
         years = range(int(years[0]), int(years[1]) + 1)
     elif len(years) > 2:
-        ValueError(f"{datetime} is not a valid value for --datetime")
+        raise ValueError(f"{datetime} is not a valid value for --datetime")
 
     grid_subset = (
         grid.loc[grid.code.isin(region_codes)] if region_codes is not None else grid
@@ -43,7 +43,7 @@ def main(
         header="time|index|status|paths|comment\n",
     )
 
-    grid_subset = filter_by_log(grid_subset, logger.parse_log())
+    grid_subset = filter_by_log(grid_subset, logger.parse_log(), not no_retry_errors)
     params = [
         {
             "region-code": region[0][0],
