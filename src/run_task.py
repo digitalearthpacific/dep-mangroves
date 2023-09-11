@@ -34,19 +34,19 @@ class MangrovesProcessor(Processor):
         # Load into memory
         median = xr.median("time").compute()
 
-        ds = ms.ndvi(median.sel(band="B08"), median.sel(band="B04")).to_dataset(name="ndvi")
+        ds = ms.ndvi(median.sel(band="B08"), median.sel(band="B04")).to_dataset(
+            name="ndvi"
+        )
 
-        ds["mangroves"] = reclassify(
-            ds.ndvi, [0.4, np.inf], [float("nan"), 1]
-        ).astype(int)
+        ds["mangroves"] = reclassify(ds.ndvi, [0.4, np.inf], [float("nan"), 1]).astype(
+            int
+        )
 
         ds["regular"] = reclassify(
             ds.ndvi, [0.4, 0.7, np.inf], [float("nan"), 1, float("nan")]
         ).astype(int)
 
-        ds["closed"] = reclassify(
-            ds.ndvi, [0.7, np.inf], [float("nan"), 1]
-        ).astype(int)
+        ds["closed"] = reclassify(ds.ndvi, [0.7, np.inf], [float("nan"), 1]).astype(int)
 
         return set_stac_properties(xr, ds)
 
@@ -60,6 +60,7 @@ def main(
     dataset_id: str = MANGROVES_DATASET_ID,
 ) -> None:
     from grid import grid
+
     areas = grid
 
     # None would be better for default but typer doesn't support it (str|None)
