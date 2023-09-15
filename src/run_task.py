@@ -6,13 +6,13 @@ import numpy as np
 import typer
 import xrspatial.multispectral as ms
 from azure_logger import CsvLogger, filter_by_log
+from dep_tools.azure import get_container_client
 from dep_tools.loaders import Sentinel2OdcLoader
 from dep_tools.namers import DepItemPath
 from dep_tools.processors import Processor
-from dep_tools.runner import run_by_area_dask_local
+from dep_tools.runner import run_by_area_dask_local, run_by_area_dask
 from dep_tools.s2_utils import scale_and_offset_s2
 from dep_tools.stac_utils import set_stac_properties
-from dep_tools.utils import get_container_client
 from dep_tools.writers import AzureDsWriter
 from typing_extensions import Annotated
 from xarray import DataArray
