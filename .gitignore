@@ -1,2 +1,6 @@
 __pycache__
 dep_s2_mangroves
+constraints.txt
+data
+venv
+.ipynb_checkpoints

@@ -1,12 +1,12 @@
-image: "ghcr.io/digitalearthpacific/dep-mangroves:latest"
+image: "ghcr.io/digitalearthpacific/dep-mangroves:0.0.1-32-gacc2deb"
 profile: r
 code: "src/"
 command:
   - python
   - run_task.py
   - --region-code
-  - PG
+  - "FJ"
   - --datetime
-  - "2020"
+  - "2023"
   - --version
-  - "0.0.1"
+  - "test"
