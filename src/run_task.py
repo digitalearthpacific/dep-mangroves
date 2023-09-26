@@ -46,7 +46,9 @@ class MangrovesProcessor(S2Processor):
         return set_stac_properties(xr, ds)
 
 
-def get_areas(region_code: Optional[str] = None, region_index: Optional[str] = None) -> gpd.GeoDataFrame:
+def get_areas(
+    region_code: Optional[str] = None, region_index: Optional[str] = None
+) -> gpd.GeoDataFrame:
     with fsspec.open(GRID_URL) as f:
         grid = gpd.read_parquet(f)
     areas = None
