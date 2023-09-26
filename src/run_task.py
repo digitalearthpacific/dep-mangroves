@@ -13,12 +13,17 @@ from azure_logger import CsvLogger, filter_by_log
 from dep_tools.azure import get_container_client
 from dep_tools.loaders import Sentinel2OdcLoader
 from dep_tools.namers import DepItemPath
-from dep_tools.runner import run_by_area_dask_local, run_by_area_dask
+from dep_tools.runner import run_by_area_dask_local
 from dep_tools.s2_utils import S2Processor
 from dep_tools.stac_utils import set_stac_properties
 from dep_tools.writers import AzureDsWriter
 
-from grid import grid
+import geopandas as gpd
+import fsspec
+
+
+GRID_URL = "https://deppcpublicstorage.blob.core.windows.net/input/gmw/grid_gmw_v3_2020_vec.parquet"
+
 
 MANGROVES_BASE_PRODUCT = "s2"
 MANGROVES_DATASET_ID = "mangroves"
@@ -40,15 +45,10 @@ class MangrovesProcessor(S2Processor):
         return set_stac_properties(xr, ds)
 
 
-def main(
-    datetime: Annotated[str, typer.Option()],
-    version: Annotated[str, typer.Option()],
-    region_code: Annotated[str, typer.Option()] = "",
-    region_index: Annotated[str, typer.Option()] = "",
-    local_cluster_kwargs: Annotated[str, typer.Option()] = "",
-    dataset_id: str = MANGROVES_DATASET_ID,
-) -> None:
-    areas = grid
+def get_areas(region_code: str, region_index: str) -> gpd.GeoDataFrame:
+    with fsspec.open(GRID_URL) as f:
+        grid = gpd.read_parquet(f)
+    areas = None
 
     # None would be better for default but typer doesn't support it (str|None)
     if region_code != "":
@@ -57,7 +57,20 @@ def main(
     if region_index != "":
         areas = grid[grid.index == (region_code, region_index)]
 
-    if len(areas) == 0:
+    return areas
+
+
+def main(
+    datetime: Annotated[str, typer.Option()],
+    version: Annotated[str, typer.Option()],
+    region_code: Annotated[str, typer.Option()] = "",
+    region_index: Annotated[str, typer.Option()] = "",
+    local_cluster_kwargs: Annotated[str, typer.Option()] = "",
+    dataset_id: str = MANGROVES_DATASET_ID,
+) -> None:
+    areas = get_areas(region_code, region_index)
+
+    if areas is None or len(areas) == 0:
         warnings.warn(
             f"index ({region_code}, {region_index}) not found in grid, no output produced"
         )
