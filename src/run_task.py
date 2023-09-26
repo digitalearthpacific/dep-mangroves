@@ -1,15 +1,13 @@
 import ast
 import sys
 import warnings
+from typing import Optional
 
+import fsspec
+import geopandas as gpd
 import numpy as np
 import typer
-from typing_extensions import Annotated
-from typing import Optional
-from xarray import DataArray
-from xrspatial.classify import reclassify
 import xrspatial.multispectral as ms
-
 from azure_logger import CsvLogger, filter_by_log
 from dep_tools.azure import get_container_client
 from dep_tools.loaders import Sentinel2OdcLoader
@@ -18,10 +16,9 @@ from dep_tools.runner import run_by_area_dask_local
 from dep_tools.s2_utils import S2Processor
 from dep_tools.stac_utils import set_stac_properties
 from dep_tools.writers import AzureDsWriter
-
-import geopandas as gpd
-import fsspec
-
+from typing_extensions import Annotated
+from xarray import DataArray
+from xrspatial.classify import reclassify
 
 GRID_URL = "https://deppcpublicstorage.blob.core.windows.net/input/gmw/grid_gmw_v3_2020_vec.parquet"
 
@@ -49,16 +46,16 @@ class MangrovesProcessor(S2Processor):
 def get_areas(
     region_code: Optional[str] = None, region_index: Optional[str] = None
 ) -> gpd.GeoDataFrame:
-    with fsspec.open(GRID_URL) as f:
-        grid = gpd.read_parquet(f)
     areas = None
+    with fsspec.open(GRID_URL) as f:
+        areas = gpd.read_parquet(f)
 
     # None would be better for default but typer doesn't support it (str|None)
-    if region_code is not None or region_code != "":
-        areas = grid[grid.index.get_level_values("code").isin([region_code])]
+    if region_code is not None and region_code != "":
+        areas = areas[areas.index.get_level_values("code").isin([region_code])]
 
-    if region_index is not None or region_index != "":
-        areas = grid[grid.index == (region_code, region_index)]
+    if region_index is not None and region_index != "":
+        areas = areas[areas.index == (region_code, region_index)]
 
     return areas
 
