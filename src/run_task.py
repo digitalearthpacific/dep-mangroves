@@ -1,15 +1,13 @@
 import ast
 import sys
 import warnings
+from typing import Optional
 
+import fsspec
+import geopandas as gpd
 import numpy as np
 import typer
-from typing_extensions import Annotated
-from typing import Optional
-from xarray import DataArray
-from xrspatial.classify import reclassify
 import xrspatial.multispectral as ms
-
 from azure_logger import CsvLogger, filter_by_log
 from dep_tools.azure import get_container_client
 from dep_tools.loaders import Sentinel2OdcLoader
@@ -18,10 +16,9 @@ from dep_tools.runner import run_by_area_dask_local
 from dep_tools.s2_utils import S2Processor
 from dep_tools.stac_utils import set_stac_properties
 from dep_tools.writers import AzureDsWriter
-
-import geopandas as gpd
-import fsspec
-
+from typing_extensions import Annotated
+from xarray import DataArray
+from xrspatial.classify import reclassify
 
 GRID_URL = "https://deppcpublicstorage.blob.core.windows.net/input/gmw/grid_gmw_v3_2020_vec.parquet"
 

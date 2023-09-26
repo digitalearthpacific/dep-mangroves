@@ -5,8 +5,8 @@ from typing import Annotated, Optional
 
 import typer
 from azure_logger import CsvLogger, filter_by_log
-from dep_tools.namers import DepItemPath
 from dep_tools.azure import get_container_client
+from dep_tools.namers import DepItemPath
 
 from run_task import MANGROVES_BASE_PRODUCT, MANGROVES_DATASET_ID, get_areas
 
