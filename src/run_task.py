@@ -5,6 +5,7 @@ import warnings
 import numpy as np
 import typer
 from typing_extensions import Annotated
+from typing import Optional
 from xarray import DataArray
 from xrspatial.classify import reclassify
 import xrspatial.multispectral as ms
@@ -45,16 +46,16 @@ class MangrovesProcessor(S2Processor):
         return set_stac_properties(xr, ds)
 
 
-def get_areas(region_code: str, region_index: str) -> gpd.GeoDataFrame:
+def get_areas(region_code: Optional[str] = None, region_index: Optional[str] = None) -> gpd.GeoDataFrame:
     with fsspec.open(GRID_URL) as f:
         grid = gpd.read_parquet(f)
     areas = None
 
     # None would be better for default but typer doesn't support it (str|None)
-    if region_code != "":
+    if region_code is not None or region_code != "":
         areas = grid[grid.index.get_level_values("code").isin([region_code])]
 
-    if region_index != "":
+    if region_index is not None or region_index != "":
         areas = grid[grid.index == (region_code, region_index)]
 
     return areas

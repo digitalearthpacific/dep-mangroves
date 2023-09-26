@@ -8,8 +8,7 @@ from azure_logger import CsvLogger, filter_by_log
 from dep_tools.namers import DepItemPath
 from dep_tools.azure import get_container_client
 
-from grid import grid
-from run_task import MANGROVES_BASE_PRODUCT, MANGROVES_DATASET_ID
+from run_task import MANGROVES_BASE_PRODUCT, MANGROVES_DATASET_ID, get_areas
 
 
 def main(
@@ -30,8 +29,9 @@ def main(
     elif len(years) > 2:
         raise ValueError(f"{datetime} is not a valid value for --datetime")
 
+    areas = get_areas()
     grid_subset = (
-        grid.loc[grid.code.isin(region_codes)] if region_codes is not None else grid
+        areas.loc[areas.code.isin(region_codes)] if region_codes is not None else areas
     )
 
     itempath = DepItemPath(MANGROVES_BASE_PRODUCT, dataset_id, version, datetime)
