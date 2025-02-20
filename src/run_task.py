@@ -1,122 +1,188 @@
-import ast
-import sys
-import warnings
-from typing import Optional
+from logging import INFO, Formatter, Logger, StreamHandler, getLogger
 
-import fsspec
-import geopandas as gpd
+import boto3
 import numpy as np
 import typer
-import xrspatial.multispectral as ms
-from azure_logger import CsvLogger, filter_by_log
-from dep_tools.azure import get_container_client
-from dep_tools.loaders import Sentinel2OdcLoader
-from dep_tools.namers import DepItemPath
-from dep_tools.runner import run_by_area_dask_local
-from dep_tools.s2_utils import S2Processor
-from dep_tools.stac_utils import set_stac_properties
-from dep_tools.writers import AzureDsWriter
+from dask.distributed import Client
+from dep_tools.aws import object_exists
+from dep_tools.exceptions import EmptyCollectionError
+from dep_tools.grids import PACIFIC_GRID_10
+from dep_tools.loaders import OdcLoader
+from dep_tools.namers import S3ItemPath
+from dep_tools.processors import Processor
+from dep_tools.searchers import PystacSearcher
+from dep_tools.stac_utils import StacCreator
+from dep_tools.task import AwsStacTask as Task
+from dep_tools.writers import AwsDsCogWriter
+from odc.stac import configure_s3_access
 from typing_extensions import Annotated
+from utils import get_gmw
 from xarray import DataArray
-from xrspatial.classify import reclassify
-
-GRID_URL = "https://deppcpublicstorage.blob.core.windows.net/input/gmw/grid_gmw_v3_2020_vec.parquet"
+import xarray as xr
 
 
-MANGROVES_BASE_PRODUCT = "s2"
-MANGROVES_DATASET_ID = "mangroves"
-output_nodata = -32767
+from odc.geo import Geometry
+
+OUTPUT_NODATA = -32767
 
 
-class MangrovesProcessor(S2Processor):
-    def process(self, xr: DataArray) -> DataArray:
-        xr = super().process(xr)
-        median = xr.median("time").compute().to_dataset("band")
-
-        ds = ms.ndvi(median.B08, median.B04).to_dataset(name="ndvi")
-        ds["mangroves"] = (
-            reclassify(ds.ndvi, [0.4, 0.7, np.inf], [0, 1, 2])
-            .astype("int16")
-            .where(ds.ndvi.notnull(), output_nodata)
+def get_logger(region_code: str, name: str) -> Logger:
+    """Set up a simple logger"""
+    console = StreamHandler()
+    time_format = "%Y-%m-%d %H:%M:%S"
+    console.setFormatter(
+        Formatter(
+            fmt=f"%(asctime)s %(levelname)s ({region_code}):  %(message)s",
+            datefmt=time_format,
         )
+    )
 
-        return set_stac_properties(xr, ds)
+    log = getLogger(name)
+    log.addHandler(console)
+    log.setLevel(INFO)
+    return log
 
 
-def get_areas(
-    region_code: Optional[str] = None, region_index: Optional[str] = None
-) -> gpd.GeoDataFrame:
-    areas = None
-    with fsspec.open(GRID_URL) as f:
-        areas = gpd.read_parquet(f)
+class MangrovesProcessor(Processor):
+    def __init__(self, areas: Geometry):
+        self.areas = areas
+        self.send_area_to_processor = False
 
-    # None would be better for default but typer doesn't support it (str|None)
-    if region_code is not None and region_code != "":
-        areas = areas[areas.index.get_level_values("code").isin([region_code])]
 
-    if region_index is not None and region_index != "":
-        areas = areas[areas.index == (region_code, region_index)]
+    def process(self, data: DataArray) -> DataArray:
+        data = data.squeeze()
 
-    return areas
+        # Mask to only keep areas identified as mangroves in the GMW dataset
+        data = data.odc.mask(self.areas)
+
+        # Create NDVI
+        data["ndvi"] = (data.nir - data.red) / (data.nir + data.red)
+
+        # Create an empty DataArray to store the mangroves classification
+        data["mangroves"] = xr.full_like(data.ndvi, OUTPUT_NODATA, dtype="int16")
+
+        # Classify so that less than 0.4 is 0, between 0.4 and 0.7 is 1, and greater than 0.7 is 2
+        data["mangroves"] = xr.where(data.ndvi <= 0.4, 0, data.mangroves)
+        data["mangroves"] = xr.where((data.ndvi > 0.4) & (data.ndvi <= 0.7), 1, data.mangroves)
+        data["mangroves"] = xr.where((data.ndvi > 0.7) & (data.ndvi <= np.inf), 2, data.mangroves)
+
+        # Mask nodata from the NDVI
+        data["mangroves"] = data.mangroves.where(data.ndvi.notnull(), OUTPUT_NODATA)
+      
+        # Only keep the mangroves band
+        data = data[["mangroves"]]
+
+        return data
 
 
 def main(
+    tile_id: Annotated[str, typer.Option()],
     datetime: Annotated[str, typer.Option()],
     version: Annotated[str, typer.Option()],
-    region_code: Annotated[str, typer.Option()] = "",
-    region_index: Annotated[str, typer.Option()] = "",
-    local_cluster_kwargs: Annotated[str, typer.Option()] = "",
-    dataset_id: str = MANGROVES_DATASET_ID,
+    output_bucket: str = None,
+    base_product: str = "s2",
+    memory_limit: str = "50GB",
+    n_workers: int = 2,
+    threads_per_worker: int = 32,
+    decimated: bool = False,
+    overwrite: Annotated[bool, typer.Option()] = False,
 ) -> None:
-    areas = get_areas(region_code, region_index)
+    log = get_logger(tile_id, "MANGROVES")
+    log.info("Starting processing.")
 
-    if areas is None or len(areas) == 0:
-        warnings.warn(
-            f"index ({region_code}, {region_index}) not found in grid, no output produced"
-        )
-        sys.exit(0)
+    grid = PACIFIC_GRID_10
 
-    loader = Sentinel2OdcLoader(
-        epsg=3832,
-        datetime=datetime,
-        dask_chunksize=dict(band=1, time=1, x=4096, y=4096),
-        odc_load_kwargs=dict(
-            fail_on_error=False,
-            resolution=10,
-            bands=["SCL", "B04", "B08"],
-        ),
+    tile_index = tuple(int(i) for i in tile_id.split(","))
+    geobox = grid.tile_geobox(tile_index)
+
+    if decimated:
+        log.warning("Running at 1/10th resolution")
+        geobox = geobox.zoom_out(10)
+
+    gmw = get_gmw()
+    geom = geobox.geographic_extent.to_crs(gmw.crs)
+
+    areas = gmw.intersection(geom)
+
+    # Make sure we can access S3
+    log.info("Configuring S3 access")
+    configure_s3_access(cloud_defaults=True)
+
+    client = boto3.client("s3")
+
+    itempath = S3ItemPath(
+        bucket=output_bucket,
+        sensor=base_product,
+        dataset_id="mangroves",
+        version=version,
+        time=datetime,
+    )
+    stac_document = itempath.stac_path(tile_id)
+
+    # If we don't want to overwrite, and the destination file already exists, skip it
+    if not overwrite and object_exists(output_bucket, stac_document, client=client):
+        log.info(f"Item already exists at {stac_document}")
+        # This is an exit with success
+        raise typer.Exit()
+
+    catalog = "https://stac.digitalearthpacific.org"
+    collection = "dep_s2_geomad"
+
+    searcher = PystacSearcher(
+        catalog=catalog, collections=[collection], datetime=datetime
     )
 
-    processor = MangrovesProcessor()
-    itempath = DepItemPath(MANGROVES_BASE_PRODUCT, dataset_id, version, datetime)
-
-    writer = AzureDsWriter(
-        itempath=itempath,
-        overwrite=False,
-        output_nodata=output_nodata,
-        extra_attrs=dict(dep_version=version),
+    loader = OdcLoader(
+        bands=["red", "nir"],
+        # chunks=[-1, 2048, 2048],
+        groupby="solar_day",
+        fail_on_error=False,
+        clip_to_area=False,
     )
 
-    logger = CsvLogger(
-        name=dataset_id,
-        container_client=get_container_client(),
-        path=itempath.log_path(),
-        overwrite=False,
-        header="time|index|status|paths|comment\n",
+    processor = MangrovesProcessor(areas=areas)
+
+    # Custom writer so we write multithreaded
+    writer = AwsDsCogWriter(itempath, write_multithreaded=True)
+
+    # STAC making thing
+    stac_creator = StacCreator(
+        itempath=itempath, remote=True, make_hrefs_https=True, with_raster=True
     )
 
-    local_cluster_kwargs_dict = (
-        ast.literal_eval(local_cluster_kwargs) if local_cluster_kwargs != "" else dict()
-    )
-    areas = filter_by_log(areas, logger.parse_log())
-    run_by_area_dask_local(
-        areas=areas,
-        loader=loader,
-        processor=processor,
-        writer=writer,
-        logger=logger,
-        continue_on_error=False,
-        local_cluster_kwargs=local_cluster_kwargs_dict,
+    try:
+        with Client(
+            n_workers=n_workers,
+            threads_per_worker=threads_per_worker,
+            memory_limit=memory_limit,
+        ):
+            log.info(
+                (
+                    f"Started dask client with {n_workers} workers "
+                    f"and {threads_per_worker} threads with "
+                    f"{memory_limit} memory"
+                )
+            )
+            paths = Task(
+                itempath=itempath,
+                id=tile_index,
+                area=geobox,
+                searcher=searcher,
+                loader=loader,
+                processor=processor,
+                writer=writer,
+                logger=log,
+                stac_creator=stac_creator,
+            ).run()
+    except EmptyCollectionError:
+        log.info("No items found for this tile")
+        raise typer.Exit()  # Exit with success
+    except Exception as e:
+        log.exception(f"Failed to process with error: {e}")
+        raise typer.Exit(code=1)
+
+    log.info(
+        f"Completed processing. Wrote {len(paths)} items to https://{output_bucket}.s3.us-west-2.amazonaws.com/{ stac_document}"
     )
 
 

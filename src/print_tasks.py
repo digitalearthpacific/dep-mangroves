@@ -1,62 +1,94 @@
 import json
 import sys
-from itertools import product
-from typing import Annotated, Optional
+from typing import Annotated, Generator, Optional
 
+import boto3
 import typer
-from azure_logger import CsvLogger, filter_by_log
-from dep_tools.namers import DepItemPath
-from dep_tools.azure import get_container_client
+from dep_tools.aws import object_exists
+from dep_tools.grids import PACIFIC_EPSG, get_tiles
+from dep_tools.namers import S3ItemPath
 
-from run_task import MANGROVES_BASE_PRODUCT, MANGROVES_DATASET_ID, get_areas
+from utils import get_gmw
+
+
+def get_tasks(tiles: list, years: list, version: str) -> Generator[dict, None, None]:
+    gmw = get_gmw()
+
+    for year in years:
+        for tile in tiles:
+            tile_geom = tile[1].geographic_extent.to_crs(PACIFIC_EPSG)
+
+            # Check if the tile intersects with the gmw
+            if tile_geom.intersects(gmw):
+                yield {
+                    "tile-id": ",".join([str(i) for i in tile[0]]),
+                    "year": year,
+                    "version": version,
+                }
 
 
 def main(
-    regions: Annotated[str, typer.Option()],
-    datetime: Annotated[str, typer.Option()],
+    years: Annotated[str, typer.Option()],
     version: Annotated[str, typer.Option()],
+    regions: Optional[str] = "ALL",
+    tile_buffer_kms: Optional[int] = 0.0,
     limit: Optional[str] = None,
-    no_retry_errors: Optional[bool] = False,
-    dataset_id: str = MANGROVES_DATASET_ID,
+    output_bucket: Optional[str] = None,
+    output_prefix: Optional[str] = None,
+    overwrite: Annotated[bool, typer.Option()] = False,
 ) -> None:
-    assert dataset_id is not None, "dataset_id must be provided"
-    region_codes = None if regions.upper() == "ALL" else regions.split(",")
+    country_codes = None if regions.upper() == "ALL" else regions.split(",")
+
+    tiles = get_tiles(
+        country_codes=country_codes, buffer_distance=tile_buffer_kms * 1000
+    )
+
+    if limit is not None:
+        limit = int(limit)
 
     # Makes a list no matter what
-    years = datetime.split("-")
+    years = years.split("-")
     if len(years) == 2:
         years = range(int(years[0]), int(years[1]) + 1)
     elif len(years) > 2:
-        raise ValueError(f"{datetime} is not a valid value for --datetime")
+        ValueError(f"{years} is not a valid value for --years")
 
-    areas = get_areas()
-    grid_subset = (
-        areas.loc[areas.code.isin(region_codes)] if region_codes is not None else areas
-    )
+    tasks = get_tasks(tiles, years, version)
 
-    itempath = DepItemPath(MANGROVES_BASE_PRODUCT, dataset_id, version, datetime)
-    logger = CsvLogger(
-        name=dataset_id,
-        container_client=get_container_client(),
-        path=itempath.log_path(),
-        overwrite=False,
-        header="time|index|status|paths|comment\n",
-    )
+    # If we don't want to overwrite, then we should only run tasks that don't already exist
+    # i.e., they failed in the past or they're missing for some other reason
+    if not overwrite:
+        valid_tasks = []
+        client = boto3.client("s3")
+        for task in tasks:
+            itempath = S3ItemPath(
+                bucket=output_bucket,
+                sensor="s2",
+                dataset_id="geomad",
+                version=version,
+                time=task["year"],
+            )
+            stac_path = itempath.stac_path(task["tile-id"].split(","))
 
-    grid_subset = filter_by_log(grid_subset, logger.parse_log(), not no_retry_errors)
-    params = [
-        {
-            "region-code": region[0][0],
-            "region-index": region[0][1],
-            "datetime": region[1],
-        }
-        for region in product(grid_subset.index, years)
-    ]
+            if output_prefix is not None:
+                stac_path = f"{output_prefix}/{stac_path}"
+
+            if not object_exists(output_bucket, stac_path, client=client):
+                valid_tasks.append(task)
+
+            # Save time if we have a limit
+            if len(valid_tasks) == limit:
+                break
+        # Switch to this list of tasks, which has been filtered
+        tasks = valid_tasks
+    else:
+        # If we are overwriting, we just keep going, making them a list not a generator
+        tasks = [t for t in tasks]
 
     if limit is not None:
-        params = params[0 : int(limit)]
+        tasks = tasks[0:limit]
 
-    json.dump(params, sys.stdout)
+    json.dump(tasks, sys.stdout)
 
 
 if __name__ == "__main__":
