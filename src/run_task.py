@@ -3,6 +3,7 @@ from logging import INFO, Formatter, Logger, StreamHandler, getLogger
 import boto3
 import numpy as np
 import typer
+import xarray as xr
 from dask.distributed import Client
 from dep_tools.aws import object_exists
 from dep_tools.exceptions import EmptyCollectionError
@@ -14,14 +15,11 @@ from dep_tools.searchers import PystacSearcher
 from dep_tools.stac_utils import StacCreator
 from dep_tools.task import AwsStacTask as Task
 from dep_tools.writers import AwsDsCogWriter
+from odc.geo import Geometry
 from odc.stac import configure_s3_access
 from typing_extensions import Annotated
 from utils import get_gmw
 from xarray import DataArray
-import xarray as xr
-
-
-from odc.geo import Geometry
 
 OUTPUT_NODATA = -32767
 
@@ -44,13 +42,17 @@ def get_logger(region_code: str, name: str) -> Logger:
 
 
 class MangrovesProcessor(Processor):
-    def __init__(self, areas: Geometry):
+    def __init__(self, areas: Geometry, scale: float = 10_000, offset: float = 0):
+        super().__init__()
         self.areas = areas
-        self.send_area_to_processor = False
-
+        self.scale = scale
+        self.offset = offset
 
     def process(self, data: DataArray) -> DataArray:
         data = data.squeeze()
+
+        # Scale and offset the data
+        data = (data * (1 / self.scale) + self.offset).clip(0, 1)
 
         # Mask to only keep areas identified as mangroves in the GMW dataset
         data = data.odc.mask(self.areas)
@@ -63,12 +65,16 @@ class MangrovesProcessor(Processor):
 
         # Classify so that less than 0.4 is 0, between 0.4 and 0.7 is 1, and greater than 0.7 is 2
         data["mangroves"] = xr.where(data.ndvi <= 0.4, 0, data.mangroves)
-        data["mangroves"] = xr.where((data.ndvi > 0.4) & (data.ndvi <= 0.7), 1, data.mangroves)
-        data["mangroves"] = xr.where((data.ndvi > 0.7) & (data.ndvi <= np.inf), 2, data.mangroves)
+        data["mangroves"] = xr.where(
+            (data.ndvi > 0.4) & (data.ndvi <= 0.7), 1, data.mangroves
+        )
+        data["mangroves"] = xr.where(
+            (data.ndvi > 0.7), 2, data.mangroves
+        )
 
         # Mask nodata from the NDVI
         data["mangroves"] = data.mangroves.where(data.ndvi.notnull(), OUTPUT_NODATA)
-      
+
         # Only keep the mangroves band
         data = data[["mangroves"]]
 
@@ -84,6 +90,8 @@ def main(
     memory_limit: str = "50GB",
     n_workers: int = 2,
     threads_per_worker: int = 32,
+    scale: Annotated[float | None, typer.Option()] = 10_000,
+    offset: Annotated[float | None, typer.Option()] = 0,
     decimated: bool = False,
     overwrite: Annotated[bool, typer.Option()] = False,
 ) -> None:
@@ -140,7 +148,7 @@ def main(
         clip_to_area=False,
     )
 
-    processor = MangrovesProcessor(areas=areas)
+    processor = MangrovesProcessor(areas=areas, scale=scale, offset=offset)
 
     # Custom writer so we write multithreaded
     writer = AwsDsCogWriter(itempath, write_multithreaded=True)
