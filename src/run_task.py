@@ -68,9 +68,7 @@ class MangrovesProcessor(Processor):
         data["mangroves"] = xr.where(
             (data.ndvi > 0.4) & (data.ndvi <= 0.7), 1, data.mangroves
         )
-        data["mangroves"] = xr.where(
-            (data.ndvi > 0.7), 2, data.mangroves
-        )
+        data["mangroves"] = xr.where((data.ndvi > 0.7), 2, data.mangroves)
 
         # Mask nodata from the NDVI
         data["mangroves"] = data.mangroves.where(data.ndvi.notnull(), OUTPUT_NODATA)
