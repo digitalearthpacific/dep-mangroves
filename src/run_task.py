@@ -42,7 +42,7 @@ def get_logger(region_code: str, name: str) -> Logger:
 
 
 class MangrovesProcessor(Processor):
-    def __init__(self, areas: Geometry, scale: float = 10_000, offset: float = 0):
+    def __init__(self, areas: Geometry, scale: float = 0.0001, offset: float = 0):
         super().__init__()
         self.areas = areas
         self.scale = scale
@@ -52,7 +52,7 @@ class MangrovesProcessor(Processor):
         data = data.squeeze()
 
         # Scale and offset the data
-        data = (data * (1 / self.scale) + self.offset).clip(0, 1)
+        data = (data * self.scale + self.offset).clip(0, 1)
 
         # Mask to only keep areas identified as mangroves in the GMW dataset
         data = data.odc.mask(self.areas)
@@ -88,7 +88,7 @@ def main(
     memory_limit: str = "50GB",
     n_workers: int = 2,
     threads_per_worker: int = 32,
-    scale: Annotated[float | None, typer.Option()] = 10_000,
+    scale: Annotated[float | None, typer.Option()] = 0.0001,
     offset: Annotated[float | None, typer.Option()] = 0,
     decimated: bool = False,
     overwrite: Annotated[bool, typer.Option()] = False,
