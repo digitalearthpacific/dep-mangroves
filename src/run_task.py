@@ -84,7 +84,6 @@ def main(
     datetime: Annotated[str, typer.Option()],
     version: Annotated[str, typer.Option()],
     output_bucket: str = None,
-    base_product: str = "s2",
     memory_limit: str = "50GB",
     n_workers: int = 2,
     threads_per_worker: int = 32,
@@ -118,7 +117,7 @@ def main(
 
     itempath = S3ItemPath(
         bucket=output_bucket,
-        sensor=base_product,
+        sensor="s2",
         dataset_id="mangroves",
         version=version,
         time=datetime,
