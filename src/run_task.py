@@ -21,7 +21,7 @@ from typing_extensions import Annotated
 from utils import get_gmw
 from xarray import DataArray
 
-OUTPUT_NODATA = -32767
+OUTPUT_NODATA = 255
 
 
 def get_logger(region_code: str, name: str) -> Logger:
@@ -61,7 +61,7 @@ class MangrovesProcessor(Processor):
         data["ndvi"] = (data.nir - data.red) / (data.nir + data.red)
 
         # Create an empty DataArray to store the mangroves classification
-        data["mangroves"] = xr.full_like(data.ndvi, OUTPUT_NODATA, dtype="int16")
+        data["mangroves"] = xr.full_like(data.ndvi, OUTPUT_NODATA, dtype="uint8")
 
         # Classify so that less than 0.4 is 0, between 0.4 and 0.7 is 1, and greater than 0.7 is 2
         data["mangroves"] = xr.where(data.ndvi <= 0.4, 0, data.mangroves)
@@ -73,8 +73,9 @@ class MangrovesProcessor(Processor):
         # Mask nodata from the NDVI
         data["mangroves"] = data.mangroves.where(data.ndvi.notnull(), OUTPUT_NODATA)
 
-        # Only keep the mangroves band
-        data = data[["mangroves"]]
+        # Only keep the mangroves band and set nodata
+        data = data[["mangroves"]].astype("uint8")
+        data.mangroves.odc.nodata = OUTPUT_NODATA
 
         return data
 
