@@ -13,7 +13,7 @@ def get_gmw_parquet() -> gpd.GeoSeries:
 
 
 def get_gmw() -> Geometry:
-    
+
     gmw = Geometry(get_gmw_parquet().to_geo_dict(), crs=PACIFIC_EPSG)
 
     return gmw
