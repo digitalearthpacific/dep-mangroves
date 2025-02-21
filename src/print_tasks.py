@@ -14,12 +14,13 @@ from utils import get_gmw
 def get_tasks(tiles: list, years: list, version: str) -> Generator[dict, None, None]:
     gmw = get_gmw()
 
-    for year in years:
-        for tile in tiles:
-            tile_geom = tile[1].geographic_extent.to_crs(PACIFIC_EPSG)
+    for tile in tiles:
+        tile_geom = tile[1].geographic_extent.to_crs(PACIFIC_EPSG)
 
-            # Check if the tile intersects with the gmw
-            if tile_geom.intersects(gmw):
+        # Check if the tile intersects with the gmw
+        if tile_geom.intersects(gmw):
+            # Do the year loop in here as an optimisation
+            for year in years:
                 yield {
                     "tile-id": ",".join([str(i) for i in tile[0]]),
                     "year": year,
