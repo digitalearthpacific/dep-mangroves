@@ -20,15 +20,18 @@ def get_tasks(
     gmw = get_gmw()
     gmw_index = STRtree([g.geom for g in gmw])
 
-    # Set up a big list of tiles, all in memory
-    tiles = PACIFIC_GRID_10.tiles(gmw.boundingbox)
-    tiles = [t for t in tiles]
-
     # If we have country codes, filter the tiles by the countries
     countries = None
+    gadm_all = gadm()
     if country_codes is not None:
-        countries = gadm().loc[lambda df: df["GID_0"].isin(country_codes)]
-        countries = Geometry(countries.union_all(), "epsg:4326")
+        countries = gadm_all.loc[lambda df: df["GID_0"].isin(country_codes)]
+    else:
+        countries = gadm_all
+    countries = Geometry(countries.union_all(), "epsg:4326")
+
+    # Set up a big list of tiles, all in memory
+    tiles = PACIFIC_GRID_10.tiles(countries.to_crs(PACIFIC_EPSG).boundingbox)
+    tiles = [t for t in tiles]  # Change to a list
 
     # This is an optimised intersection, using a spatial index
     # to find the tiles that intersect with the GMW data
@@ -36,15 +39,16 @@ def get_tasks(
     # if we have them
     aoi_tiles = []
     for tile in tiles:
-        geometry = tile[1].geographic_extent
-        projected = geometry.to_crs(PACIFIC_EPSG)
+        projected = tile[1].geographic_extent.to_crs(PACIFIC_EPSG)
 
         if gmw_index.query(projected.geom).any():
             aoi_tiles.append(tile)
 
+
     # Finally, punch out a JSON list of tasks
     for tile in aoi_tiles:
         if countries is not None:
+            geometry = tile[1].geographic_extent
             # Check if the tile intersects with the countries
             if not countries.intersects(geometry):
                 # It doesn't, so skip it
