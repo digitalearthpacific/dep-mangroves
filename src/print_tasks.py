@@ -95,7 +95,7 @@ def main(
             itempath = S3ItemPath(
                 bucket=output_bucket,
                 sensor="s2",
-                dataset_id="geomad",
+                dataset_id="mangroves",
                 version=version,
                 time=task["year"],
             )
