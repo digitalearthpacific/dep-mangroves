@@ -40,16 +40,18 @@ def get_tasks(
         projected = geometry.to_crs(PACIFIC_EPSG)
 
         if gmw_index.query(projected.geom).any():
-            if countries is not None:
-                # Check if the tile intersects with the countries
-                if countries.intersects(geometry):
-                    # If it does, add it to the list
-                    aoi_tiles.append(tile)
-            else:
-                aoi_tiles.append(tile)
+            aoi_tiles.append(tile)
 
     # Finally, punch out a JSON list of tasks
     for tile in aoi_tiles:
+        if countries is not None:
+            # Check if the tile intersects with the countries
+            if not countries.intersects(geometry):
+                # It doesn't, so skip it
+                continue
+        # If we get here, the tile intersects with the GMW data
+        # and the countries, so we can add it to the list of tasks
+        # for each year.
         for year in years:
             yield {
                 "tile-id": ",".join([str(i) for i in tile[0]]),
@@ -87,7 +89,6 @@ def main(
         valid_tasks = []
         client = boto3.client("s3")
         for task in tasks:
-            print("Checking task...")
             itempath = S3ItemPath(
                 bucket=output_bucket,
                 sensor="s2",
