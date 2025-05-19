@@ -7,7 +7,7 @@ from odc.geo import Geometry
 
 def get_gmw_parquet() -> gpd.GeoSeries:
     current_dir = Path(__file__).parent
-    gmw_file = current_dir / "gmw_pacific.parquet"
+    gmw_file = current_dir / "gmw_pacific_new.parquet"
 
     return gpd.read_parquet(gmw_file)
 
