@@ -44,7 +44,6 @@ def get_tasks(
         if gmw_index.query(projected.geom).any():
             aoi_tiles.append(tile)
 
-
     # Finally, punch out a JSON list of tasks
     for tile in aoi_tiles:
         if countries is not None:
