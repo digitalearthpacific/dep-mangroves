@@ -45,7 +45,6 @@ class MangrovesProcessor(Processor):
         self.offset = offset
 
     def process(self, data: DataArray) -> DataArray:
-
         return process_mangroves(data, self.areas, self.scale, self.offset)
 
 
