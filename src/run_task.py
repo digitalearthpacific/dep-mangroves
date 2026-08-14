@@ -1,9 +1,7 @@
 from logging import INFO, Formatter, Logger, StreamHandler, getLogger
 
 import boto3
-import numpy as np
 import typer
-import xarray as xr
 from dask.distributed import Client
 from dep_tools.aws import object_exists
 from dep_tools.exceptions import EmptyCollectionError
@@ -18,10 +16,8 @@ from dep_tools.writers import AwsDsCogWriter
 from odc.geo import Geometry
 from odc.stac import configure_s3_access
 from typing_extensions import Annotated
-from utils import get_gmw
+from utils import get_gmw, process_mangroves
 from xarray import DataArray
-
-OUTPUT_NODATA = 255
 
 
 def get_logger(region_code: str, name: str) -> Logger:
@@ -40,7 +36,6 @@ def get_logger(region_code: str, name: str) -> Logger:
     log.setLevel(INFO)
     return log
 
-
 class MangrovesProcessor(Processor):
     def __init__(self, areas: Geometry, scale: float = 0.0001, offset: float = 0):
         super().__init__()
@@ -49,35 +44,8 @@ class MangrovesProcessor(Processor):
         self.offset = offset
 
     def process(self, data: DataArray) -> DataArray:
-        data = data.squeeze()
 
-        # Scale and offset the data
-        data = (data * self.scale + self.offset).clip(0, 1)
-
-        # Mask to only keep areas identified as mangroves in the GMW dataset
-        data = data.odc.mask(self.areas)
-
-        # Create NDVI
-        data["ndvi"] = (data.nir - data.red) / (data.nir + data.red)
-
-        # Create an empty DataArray to store the mangroves classification
-        data["mangroves"] = xr.full_like(data.ndvi, OUTPUT_NODATA, dtype="uint8")
-
-        # Classify so that less than 0.4 is 0, between 0.4 and 0.7 is 1, and greater than 0.7 is 2
-        data["mangroves"] = xr.where(data.ndvi <= 0.4, 0, data.mangroves)
-        data["mangroves"] = xr.where(
-            (data.ndvi > 0.4) & (data.ndvi <= 0.7), 1, data.mangroves
-        )
-        data["mangroves"] = xr.where((data.ndvi > 0.7), 2, data.mangroves)
-
-        # Mask nodata from the NDVI
-        data["mangroves"] = data.mangroves.where(data.ndvi.notnull(), OUTPUT_NODATA)
-
-        # Only keep the mangroves band and set nodata
-        data = data[["mangroves"]].astype("uint8")
-        data.mangroves.odc.nodata = OUTPUT_NODATA
-
-        return data
+        return process_mangroves(data, self.areas, self.scale, self.offset)
 
 
 def main(
