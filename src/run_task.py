@@ -36,6 +36,7 @@ def get_logger(region_code: str, name: str) -> Logger:
     log.setLevel(INFO)
     return log
 
+
 class MangrovesProcessor(Processor):
     def __init__(self, areas: Geometry, scale: float = 0.0001, offset: float = 0):
         super().__init__()
